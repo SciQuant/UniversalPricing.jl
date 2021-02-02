@@ -31,6 +31,9 @@ jobs:
             ${{ runner.os }}-test-${{ env.cache-name }}-
             ${{ runner.os }}-test-
             ${{ runner.os }}-
+      - name: install UniversalDynamics
+        run: |
+          julia --project=@. -e 'using Pkg; Pkg.add(PackageSpec(url="https://github.com/SciQuant/UniversalDynamics.jl"))'
       - uses: julia-actions/julia-buildpkg@v1
       - uses: julia-actions/julia-runtest@v1
   docs:

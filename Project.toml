@@ -3,6 +3,10 @@ uuid = "8110a956-2552-469c-bcd0-ddf925ed1df7"
 authors = ["SciQuant"]
 version = "0.1.0"
 
+[deps]
+Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
+UniversalDynamics = "e34ebe0d-adf9-4359-84c2-dfdf884d416d"
+
 [compat]
 julia = "1.5"
 
