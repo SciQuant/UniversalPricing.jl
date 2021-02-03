@@ -47,6 +47,7 @@ jobs:
       - run: |
           julia --project=docs -e '
             using Pkg
+            Pkg.add([PackageSpec(url="https://github.com/SciQuant/UniversalDynamics.jl"), PackageSpec(path=pwd())])
             Pkg.develop(PackageSpec(path=pwd()))
             Pkg.instantiate()'
       - run: julia --project=docs docs/make.jl
