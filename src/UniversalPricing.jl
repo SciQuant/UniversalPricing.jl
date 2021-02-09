@@ -12,4 +12,7 @@ abstract type ExpectedValueEstimate end
 include("mc_estimate.jl")
 export MCExpectation, 𝔼
 
+include("longstaffschwartz_estimate.jl")
+export LongstaffSchwartzExpectation
+
 end

@@ -15,8 +15,8 @@ MCExpectation(x::Real) = MCExpectation(x, zero(x))
 """
     MCExpectation(f, u, p) -> MCExpectation
 
-Computes a Monte Carlo estimation for the expectation of the random variable `f` using
-realizations `u`.
+Computes a Monte Carlo estimation for the expectation of the random variable `f(u, p)` using
+realizations `u` and parameters `p`.
 """
 function MCExpectation(f, u::EnsembleSolution, p)
     trajectories = length(u)
@@ -25,6 +25,8 @@ function MCExpectation(f, u::EnsembleSolution, p)
     for n in 1:trajectories
         evs[n] = f(u[n], p)
     end
+
+    # evs = f.(u, Ref(p))
 
     # fair value and standard deviation
     μ = mean(evs)
