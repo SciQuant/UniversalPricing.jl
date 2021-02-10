@@ -119,3 +119,12 @@ plot!(x, bookf)
 
 layer.(x, Ref(res.minimizer))
 round.(bookf.(x), digits=4)
+
+
+using LsqFit
+
+@. g(x, p) = p[1] + p[2] * x + p[3] * x ^ 2
+xdata = x
+ydata = y
+p0 = [0.1, 0.1, 0.1]
+fit = curve_fit(g, xdata, ydata, p0; autodiff=:forwarddiff)
