@@ -50,14 +50,7 @@ end
 
 τ = fill(0.1, 3)
 
-#! este algoritmo no esta diseñado para tener ejercicio en la ultima fecha, por lo que es de
-#! esperar que no me vaya a dar bien si hago esto! Es para CLEs.
-#! por otro lado, tampoco miramos si la condicion de ejercicio es estrictamente positiva para
-#! los CLEs, porque eso siempre pasa (entro a un Swap, no a put o call q pueden ser cero).
-#! por eso el Andersen no tiene eso.
-#! en el caso de una opcion como esta, tengo que mirar Brigo o LS bibliografia y creo que ahi
-#! se remueven de la regresion los casos donde el valor de ejercicio esta out of the money.
-ζ, U, H, Q, μ, σ = LongstaffSchwartzExpectation(AmericanPutExercise, Discount, Regressors, τ, mc, ds_oop.params)
+res = callable_product_valuation(AmericanPutExercise, Discount, Regressors, τ, mc, ds_oop.params)
 
 
 
@@ -89,13 +82,17 @@ function Discount(p, t, T)
 end
 
 mc = [
-    1.00  1.00  1.00  1.00  1.00  1.00  1.00  1.00
-    1.09  1.16  1.22  0.93  1.11  0.76  0.92  0.88
-    1.08  1.26  1.07  0.97  1.56  0.77  0.84  1.22
-    1.34  1.54  1.03  0.92  1.52  0.9   1.01  1.34
+    1.0  1.09  1.08  1.34
+    1.0  1.16  1.26  1.54
+    1.0  1.22  1.07  1.03
+    1.0  0.93  0.97  0.92
+    1.0  1.11  1.56  1.52
+    1.0  0.76  0.77  0.9
+    1.0  0.92  0.84  1.01
+    1.0  0.88  1.22  1.34
 ]
 
 τ = fill(1., 3)
 params = (K=1.10, r = 0.06)
 
-ζ, U, H, Q, μ, σ = LongstaffSchwartzExpectation(AmericanPutExercise, Discount, Regressors, τ, mc, params)
+res = callable_product_valuation(AmericanPutExercise, Discount, Regressors, τ, mc, params)
