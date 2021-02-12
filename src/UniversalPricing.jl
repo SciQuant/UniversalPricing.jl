@@ -1,6 +1,9 @@
 module UniversalPricing
 
-using UniversalDynamics
+using Reexport
+
+@reexport using UniversalDynamics
+
 using StochasticDiffEq
 using Statistics
 using LsqFit

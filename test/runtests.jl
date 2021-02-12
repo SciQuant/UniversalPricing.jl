@@ -1,6 +1,4 @@
 using UniversalPricing
 using Test
 
-@testset "UniversalPricing.jl" begin
-    # Write your tests here.
-end
+@testset "Longstaff Schwartz paper tests" begin include("LongstaffSchwartz.jl") end

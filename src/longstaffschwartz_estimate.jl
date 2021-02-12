@@ -1,4 +1,8 @@
 
+import UniversalDynamics: tenor_structure
+
+tenor_structure(::Nothing) = nothing
+
 struct LongstaffSchwartzEstimate{T} <: ExpectedValueEstimate
     μ::T
     σ::T
@@ -14,38 +18,33 @@ const LongstaffSchwartzExpectation = LongstaffSchwartzEstimate
 # p: parameters
 
 # from Longstaff and Schwartz
-function callable_product_valuation(ExerciseValue, DiscountFactor, Regressors, τ, u, p)
+function callable_product_valuation(
+    ExerciseValue, DiscountFactor, Regressors, mc, p; τ=nothing, Tenors=tenor_structure(τ)
+)
 
-    T = eltype(u)
-
-    # tenor structure
-    Tenors = UniversalDynamics.tenor_structure(τ)
+    if isnothing(Tenors)
+        throw(ArgumentError("Provide either a `Tenors` or a `τ`s structure."))
+    end
 
     N = length(Tenors)
-    K = length(u) # number of paths
-    # K, N = size(u)
+    K = length(mc) # number of paths
+    # K, N = size(mc)
+
+    S = eltype(mc)
 
     # Exercise values
-    U = Vector{T}(undef, K)
+    U = Vector{S}(undef, K)
 
     # Payoff values
-    V = Vector{T}(undef, K)
+    V = Vector{S}(undef, K)
 
     # for regressions
-    x = Vector{T}(undef, K)
-    y = Vector{T}(undef, K)
+    x = Vector{S}(undef, K)
+    y = Vector{S}(undef, K)
 
     # explanatory variables
-    # en el caso general, `ζ` apunta a un vector y esa dimension q la calculo antes
-    ζ = Matrix{T}(undef, K, N)
-    for k in 1:K
-        uₖ = u[k] #! si es UniversalDynamics solution
-        # uₖ = u[k,:]
-        # there is no need for a regression in Tenors[N]
-        for n in 2:N-1
-            ζ[k,n] = Regressors(uₖ, p, Tenors[n], Tenors, n)
-        end
-    end
+    ζ = Vector{S}(undef, K)
+    # ζ = Matrix{T}(undef, K, Q)
 
     # for now use this, later it is going to be a `TensorLayer` from DiffEqFlux
     @. f(x, p) = p[1] + p[2] * x + p[3] * x^2
@@ -54,8 +53,11 @@ function callable_product_valuation(ExerciseValue, DiscountFactor, Regressors, �
     # loop over exercise dates
     for n in N:-1:2
 
+        # exercise date
+        t = Tenors[n]
+
         for k in 1:K
-            U[k] = ExerciseValue(u[k], p, Tenors[n], Tenors, n)
+            U[k] = ExerciseValue(mc[k], p, t, Tenors, n)
         end
 
         if n == N
@@ -64,13 +66,16 @@ function callable_product_valuation(ExerciseValue, DiscountFactor, Regressors, �
             end
         else
 
+            # previous exercise date inspected
+            T = Tenors[n+1]
+
             # Perform regression for each exercise date considering only in the money cases
             i = 0
             for k in 1:K
                 if U[k] > zero(T)
                     i += 1
-                    x[i] = ζ[k,n] #! conviene calcular aca los regresors asi usamos solo los que necesitamos
-                    y[i] = DiscountFactor(p, Tenors[n], Tenors[n+1], Tenors, n, n+1) * V[k]
+                    x[i] = ζ[k] = Regressors(mc[k], p, t, Tenors, n)
+                    y[i] = DiscountFactor(p, t, T, Tenors, n, n+1) * V[k]
                 end
             end
             x′ = @view x[1:i]
@@ -79,10 +84,10 @@ function callable_product_valuation(ExerciseValue, DiscountFactor, Regressors, �
 
             for k in 1:K
                 Uₖ = U[k]
-                if Uₖ > zero(T) && Uₖ > f(ζ[k,n], HoldValue.param)[1]
+                if Uₖ > zero(T) && Uₖ > f(ζ[k], HoldValue.param)[1]
                     V[k] = Uₖ
                 else
-                    V[k] *= DiscountFactor(p, Tenors[n], Tenors[n+1], Tenors, n, n+1)
+                    V[k] *= DiscountFactor(p, t, T, Tenors, n, n+1)
                 end
             end
         end
@@ -93,7 +98,7 @@ function callable_product_valuation(ExerciseValue, DiscountFactor, Regressors, �
     μ = mean(V)
     σ = stdm(V, μ; corrected=true) / sqrt(K)
 
-    return LongstaffSchwartzEstimate{T}(μ, σ)
+    return LongstaffSchwartzEstimate{S}(μ, σ)
 end
 
 # from Andersen and Piterbarg
