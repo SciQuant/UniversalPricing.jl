@@ -26,9 +26,9 @@ function callable_product_valuation(ExerciseValue, DiscountFactor, Regressors, �
     # tenor structure
     Tenors = UniversalDynamics.tenor_structure(τ)
 
-    # N = length(Tenors)
-    # K = length(u) # number of paths
-    K, N = size(u)
+    N = length(Tenors)
+    K = length(u) # number of paths
+    # K, N = size(u)
 
     # exercise dates from last to first, note that the last date is included
     Te = @view Tenors[N:-1:2]
@@ -41,23 +41,23 @@ function callable_product_valuation(ExerciseValue, DiscountFactor, Regressors, �
     # U[1] is never used but we keep it in order to use same indexes
     U = Matrix{T}(undef, K, N)
 
-    # Handler for max(H, U)
-    #! creo que esto prodiamos llamarlo intrinsic value
-    Q = Matrix{T}(undef, K, N)
+    # cashflow matrix
+    C = Matrix{T}(undef, K, N)
 
     # for regressions
     x = zeros(T, K)
     y = zeros(T, K)
 
-    # holds the index `n` where the option is executed for each trial, i.e. the stopping
-    # rule
+    # the index `n` where the option is executed for each trial, i.e. the stopping rule
     E = Vector{Int32}(undef, K)
-    fill!(E, -1)
+
+    # by default, we take the last cashflow
+    fill!(E, N)
 
     # assuming that the exercise value has a closed form solution for its expectation
     for k in 1:K
-        #! uₖ = u[k] # si es UniversalDynamics solution
-        uₖ = u[k,:]
+        uₖ = u[k] #! si es UniversalDynamics solution
+        # uₖ = u[k,:]
         for n in 2:N
             U[k,n] = ExerciseValue(uₖ, p, Tenors, n)
         end
@@ -67,13 +67,10 @@ function callable_product_valuation(ExerciseValue, DiscountFactor, Regressors, �
     # en el caso general, `ζ` apunta a un vector y esa dimension q la calculo antes
     ζ = Matrix{T}(undef, K, N)
     for k in 1:K
-        #! uₖ = u[k] # si es UniversalDynamics solution
-        uₖ = u[k,:]
+        uₖ = u[k] #! si es UniversalDynamics solution
+        # uₖ = u[k,:]
         # there is no need for a regression in Tenors[N]
         for n in 2:N-1
-            # en el caso general, el usuario entrega una funcion que retorna un vector de
-            # dimension `q` con las variables explanatorias dadas las simulaciones del trial
-            # k. Ahora igual estoy considerando una unica explanatory variable
             ζ[k,n] = Regressors(uₖ, p, Tenors, n)
         end
     end
@@ -85,9 +82,6 @@ function callable_product_valuation(ExerciseValue, DiscountFactor, Regressors, �
     # loop over exercise dates
     for (e, n) in enumerate(N:-1:2)
 
-        # T = Tenors[n]
-        # Te = T[e]
-
         if isone(e) # n == N
 
             # the hold value is zero at Tenors[N]
@@ -96,15 +90,11 @@ function callable_product_valuation(ExerciseValue, DiscountFactor, Regressors, �
             for k in 1:K
                 if U[k,n] > H[k,n]
                     E[k] = n
-                    Q[k,n] = U[k,n]
+                    C[k,n] = U[k,n]
                 else
-                    Q[k,n] = H[k,n]
+                    C[k,n] = H[k,n]
                 end
             end
-
-            # same as above
-            # Q[:,n] .= max.(@view(U[:,n]), @view(H[:,n]))
-            # @views Q[:,n] .= max.(U[:,n], H[:,n])
         else
 
             # Perform a regression for each exercise date considering only in the money cases
@@ -115,39 +105,44 @@ function callable_product_valuation(ExerciseValue, DiscountFactor, Regressors, �
                 # podriamos pasar una funcion para ver si estan on the money
                 if U[k,n] > zero(T)
                     i += 1
+                    n′ = E[k]
                     x[i] = ζ[k,n]
-                    y[i] = DiscountFactor(p, Tenors[n], Tenors[n+1]) * Q[k,n+1]
+                    y[i] = DiscountFactor(p, Tenors[n], Tenors[n′]) * C[k,n′]
                 end
             end
             x′ = @view x[1:i]
             y′ = @view y[1:i]
             HoldValue = curve_fit(f, x′, y′, param; autodiff=:forwarddiff)
 
-            @show x′
-            @show y′
-            @show HoldValue.param
-            @show ""
+            # @show x′
+            # @show y′
+            # @show HoldValue.param
+            # @show ""
 
             for k in 1:K
-
-                # hold or continuation value comes from regression
-                H[k,n] = f(ζ[k,n], HoldValue.param)[1]
 
                 # solo miramos aquellos donde quizas conviene ejercer, es decir, los que no
                 # filtramos en la regresion
                 if U[k,n] > zero(T)
+
+                    # hold or continuation value comes from regression
+                    H[k,n] = f(ζ[k,n], HoldValue.param)[1]
+
                     if U[k,n] > H[k,n]
+                        # si el ejercicio es mayor al holdeo, ejercito y guardo el cashflow
                         E[k] = n
-                        Q[k,n] = U[k,n]
+                        C[k,n] = U[k,n] # podria hacer cero para todo tenor > Tenors[n]
                     else
-                        Q[k,n] = H[k,n]
+                        # si no, holdeo y el cashflow es zero
+                        #! cual de los dos va? con zero hago bien la regresion...
+                        #! creo que ahora puede ir cualquiera de los dos...
+                        #! mmm... quizas va C[k,n+1] * Discount(...)
+                        C[k,n] = zero(T)# H[k,n]
                     end
                 else
-                    Q[k,n] = zero(T)
+                    # conviene no ejercitar, entonces no recibo cashflow
+                    C[k,n] = zero(T)
                 end
-
-                # same as above
-                # Q[k,n] = max(U[k,n], H[k,n])
             end
         end
     end
@@ -158,14 +153,14 @@ function callable_product_valuation(ExerciseValue, DiscountFactor, Regressors, �
             V[k] = zero(T)
         else
             n = E[k]
-            V[k] = DiscountFactor(p, Tenors[1], Tenors[n]) * Q[k,n]
+            V[k] = DiscountFactor(p, Tenors[1], Tenors[n]) * C[k,n]
         end
     end
 
     μ = mean(V)
     σ = stdm(V, μ; corrected=true) / sqrt(K)
 
-    return LongstaffSchwartzEstimate{T}(μ, σ, ζ, U, H, Q)
+    return LongstaffSchwartzEstimate{T}(μ, σ, ζ, U, H, C)
 end
 
 # from Andersen and Piterbarg
