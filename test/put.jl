@@ -27,23 +27,20 @@ sol_oop = solve(ds_oop, 1., alg=UniversalDynamics.EM(), dt=0.01, seed=1)
 mc = montecarlo(ds_oop, 1., 1000; alg=UniversalDynamics.EM(), seed=1, dt=0.01)
 plot(mc)
 
-function AmericanPutExercise(u, p, Tenors, n)
+function AmericanPutExercise(u, p, t, Tenors=nothing, n=nothing)
     @unpack x_security = p
     @unpack K = p
     X = remake(x_security, u)
-    t = Tenors[n]
-
     return max(K - X(t), zero(K))
 end
 
-function Regressors(u, p, Tenors, n)
+function Regressors(u, p, t, Tenors=nothing, n=nothing)
     @unpack x_security = p
     X = remake(x_security, u)
-    t = Tenors[n]
     return X(t)
 end
 
-function Discount(p, t, T)
+function Discount(p, t, T, Tenors=nothing, n=nothing, n′=nothing)
     @unpack r = p
     return exp(-r * (T - t))
 end
@@ -116,23 +113,20 @@ dynamics = OrderedDict(:x => x)
 ds_oop = DynamicalSystem(f, g, dynamics, (σ=0.40, r=0.06, K=40.))
 mc = montecarlo(ds_oop, 1., 100_000; alg=UniversalDynamics.EM(), seed=1, dt=0.02)
 
-function AmericanPutExercise(u, p, Tenors, n)
+function AmericanPutExercise(u, p, t, Tenors=nothing, n=nothing)
     @unpack x_security = p
     @unpack K = p
     X = remake(x_security, u)
-    t = Tenors[n]
-
     return max(K - X(t), zero(K))
 end
 
-function Regressors(u, p, Tenors, n)
+function Regressors(u, p, t, Tenors=nothing, n=nothing)
     @unpack x_security = p
     X = remake(x_security, u)
-    t = Tenors[n]
     return X(t)
 end
 
-function Discount(p, t, T)
+function Discount(p, t, T, Tenors=nothing, n=nothing, n′=nothing)
     @unpack r = p
     return exp(-r * (T - t))
 end

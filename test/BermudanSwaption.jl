@@ -68,7 +68,7 @@ sol_iip = solve(ds_iip, 1., seed=1)
 
 
 # exercise value at time Tn = Tenors[n] as a solved expectation
-function BermudanSwaptionExercise(u, p, Tenors, n)
+function BermudanSwaptionExercise(u, p, t, Tenors=nothing, n=nothing)
     @unpack L_dynamics, L_security = p
     @unpack τ, C = p
 
@@ -79,7 +79,7 @@ function BermudanSwaptionExercise(u, p, Tenors, n)
     # evaluar su present value. Es decir, definiremos un swap con una estructura de tenors
     # cada vez mas corta y evaluaremos su present value.
 
-    Tn = Tenors[n]
+    Tn = Tenors[n] #! reemplazar por t
     # this is one way
     # sum(IR.P(Tn, Tenors[i+1]) * τ[i] * (C[i] - IR.L(i, Tn)) for i in n:length(Tenors)-1)
 

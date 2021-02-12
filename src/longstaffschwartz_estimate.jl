@@ -2,11 +2,6 @@
 struct LongstaffSchwartzEstimate{T} <: ExpectedValueEstimate
     μ::T
     σ::T
-
-    ζ::Matrix{T}
-    U::Matrix{T}
-    H::Matrix{T}
-    Q::Matrix{T}
 end
 
 const LongstaffSchwartzExpectation = LongstaffSchwartzEstimate
@@ -30,38 +25,15 @@ function callable_product_valuation(ExerciseValue, DiscountFactor, Regressors, �
     K = length(u) # number of paths
     # K, N = size(u)
 
-    # exercise dates from last to first, note that the last date is included
-    Te = @view Tenors[N:-1:2]
+    # Exercise values
+    U = Vector{T}(undef, K)
 
-    # Hold or Continuation values goes from Tenors[1] to Tenors[N-1]
-    # H[N] is never used but we keep it in order to use same indexes
-    H = Matrix{T}(undef, K, N)
-
-    # Exercise values goes from Tenors[2] to Tenors[end]
-    # U[1] is never used but we keep it in order to use same indexes
-    U = Matrix{T}(undef, K, N)
-
-    # cashflow matrix
-    C = Matrix{T}(undef, K, N)
+    # Payoff values
+    V = Vector{T}(undef, K)
 
     # for regressions
-    x = zeros(T, K)
-    y = zeros(T, K)
-
-    # the index `n` where the option is executed for each trial, i.e. the stopping rule
-    E = Vector{Int32}(undef, K)
-
-    # by default, we take the last cashflow
-    fill!(E, N)
-
-    # assuming that the exercise value has a closed form solution for its expectation
-    for k in 1:K
-        uₖ = u[k] #! si es UniversalDynamics solution
-        # uₖ = u[k,:]
-        for n in 2:N
-            U[k,n] = ExerciseValue(uₖ, p, Tenors, n)
-        end
-    end
+    x = Vector{T}(undef, K)
+    y = Vector{T}(undef, K)
 
     # explanatory variables
     # en el caso general, `ζ` apunta a un vector y esa dimension q la calculo antes
@@ -71,7 +43,7 @@ function callable_product_valuation(ExerciseValue, DiscountFactor, Regressors, �
         # uₖ = u[k,:]
         # there is no need for a regression in Tenors[N]
         for n in 2:N-1
-            ζ[k,n] = Regressors(uₖ, p, Tenors, n)
+            ζ[k,n] = Regressors(uₖ, p, Tenors[n], Tenors, n)
         end
     end
 
@@ -80,87 +52,48 @@ function callable_product_valuation(ExerciseValue, DiscountFactor, Regressors, �
     param = [0.1, 0.1, 0.1]
 
     # loop over exercise dates
-    for (e, n) in enumerate(N:-1:2)
+    for n in N:-1:2
 
-        if isone(e) # n == N
+        for k in 1:K
+            U[k] = ExerciseValue(u[k], p, Tenors[n], Tenors, n)
+        end
 
-            # the hold value is zero at Tenors[N]
-            H[:,n] .= zero(T)
-
+        if n == N
             for k in 1:K
-                if U[k,n] > H[k,n]
-                    E[k] = n
-                    C[k,n] = U[k,n]
-                else
-                    C[k,n] = H[k,n]
-                end
+                V[k] = U[k]
             end
         else
 
-            # Perform a regression for each exercise date considering only in the money cases
+            # Perform regression for each exercise date considering only in the money cases
             i = 0
-            fill!(x, zero(T))
-            fill!(y, zero(T))
             for k in 1:K
-                # podriamos pasar una funcion para ver si estan on the money
-                if U[k,n] > zero(T)
+                if U[k] > zero(T)
                     i += 1
-                    n′ = E[k]
-                    x[i] = ζ[k,n]
-                    y[i] = DiscountFactor(p, Tenors[n], Tenors[n′]) * C[k,n′]
+                    x[i] = ζ[k,n] #! conviene calcular aca los regresors asi usamos solo los que necesitamos
+                    y[i] = DiscountFactor(p, Tenors[n], Tenors[n+1], Tenors, n, n+1) * V[k]
                 end
             end
             x′ = @view x[1:i]
             y′ = @view y[1:i]
             HoldValue = curve_fit(f, x′, y′, param; autodiff=:forwarddiff)
 
-            # @show x′
-            # @show y′
-            # @show HoldValue.param
-            # @show ""
-
             for k in 1:K
-
-                # solo miramos aquellos donde quizas conviene ejercer, es decir, los que no
-                # filtramos en la regresion
-                if U[k,n] > zero(T)
-
-                    # hold or continuation value comes from regression
-                    H[k,n] = f(ζ[k,n], HoldValue.param)[1]
-
-                    if U[k,n] > H[k,n]
-                        # si el ejercicio es mayor al holdeo, ejercito y guardo el cashflow
-                        E[k] = n
-                        C[k,n] = U[k,n] # podria hacer cero para todo tenor > Tenors[n]
-                    else
-                        # si no, holdeo y el cashflow es zero
-                        #! cual de los dos va? con zero hago bien la regresion...
-                        #! creo que ahora puede ir cualquiera de los dos...
-                        #! mmm... quizas va C[k,n+1] * Discount(...)
-                        C[k,n] = zero(T)# H[k,n]
-                    end
+                Uₖ = U[k]
+                if Uₖ > zero(T) && Uₖ > f(ζ[k,n], HoldValue.param)[1]
+                    V[k] = Uₖ
                 else
-                    # conviene no ejercitar, entonces no recibo cashflow
-                    C[k,n] = zero(T)
+                    V[k] *= DiscountFactor(p, Tenors[n], Tenors[n+1], Tenors, n, n+1)
                 end
             end
         end
     end
 
-    V = Vector{T}(undef, K)
-    for k in 1:K
-        if E[k] == -1
-            V[k] = zero(T)
-        else
-            n = E[k]
-            V[k] = DiscountFactor(p, Tenors[1], Tenors[n]) * C[k,n]
-        end
-    end
+    V .*= DiscountFactor(p, Tenors[1], Tenors[2], Tenors, 1, 2)
 
     μ = mean(V)
     σ = stdm(V, μ; corrected=true) / sqrt(K)
 
-    return LongstaffSchwartzEstimate{T}(μ, σ, ζ, U, H, C)
+    return LongstaffSchwartzEstimate{T}(μ, σ)
 end
 
 # from Andersen and Piterbarg
