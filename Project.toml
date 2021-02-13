@@ -11,6 +11,7 @@ StochasticDiffEq = "789caeaf-c7a9-5a7d-9973-96adeb23e2a0"
 UniversalDynamics = "e34ebe0d-adf9-4359-84c2-dfdf884d416d"
 
 [compat]
+Reexport = "1.0"
 julia = "1.5"
 
 [extras]
