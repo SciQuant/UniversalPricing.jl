@@ -52,7 +52,7 @@ res = callable_product_valuation(AmericanPutExercise, Discount, Regressors, τ, 
 
 
 
-function AmericanPutExercise(u, p, Tenors, n)
+function AmericanPutExercise(u, p, t, Tenors=nothing, n=nothing)
     # @unpack x_security = p
     @unpack K = p
     # X = remake(x_security, u)
@@ -61,14 +61,14 @@ function AmericanPutExercise(u, p, Tenors, n)
     return max(K - u[n], zero(K))
 end
 
-function Regressors(u, p, Tenors, n)
+function Regressors(u, p, t, Tenors=nothing, n=nothing)
     # @unpack x_security = p
     # X = remake(x_security, u)
     # t = Tenors[n]
     return u[n]
 end
 
-function Discount(p, t, T)
+function Discount(p, t, T, Tenors=nothing, n=nothing, n′=nothing)
     @unpack r = p
     return exp(-r * (T - t))
 end
@@ -87,7 +87,7 @@ mc = [
 τ = fill(1., 3)
 params = (K=1.10, r = 0.06)
 
-res = callable_product_valuation(AmericanPutExercise, Discount, Regressors, τ, mc, params)
+res = callable_product_valuation(mc, params, AmericanPutExercise, Discount, Regressors, τ=τ)
 
 
 
@@ -111,7 +111,7 @@ end
 
 dynamics = OrderedDict(:x => x)
 ds_oop = DynamicalSystem(f, g, dynamics, (σ=0.40, r=0.06, K=40.))
-mc = montecarlo(ds_oop, 1., 100_000; alg=UniversalDynamics.EM(), seed=1, dt=0.02)
+mc = montecarlo(ds_oop, 1., 1000; alg=UniversalDynamics.EM(), seed=1, dt=0.02)
 
 function AmericanPutExercise(u, p, t, Tenors=nothing, n=nothing)
     @unpack x_security = p
@@ -132,4 +132,5 @@ function Discount(p, t, T, Tenors=nothing, n=nothing, n′=nothing)
 end
 
 τ = fill(0.02, 50)
-res = callable_product_valuation(AmericanPutExercise, Discount, Regressors, τ, mc, ds_oop.params)
+res = callable_product_valuation(mc, ds_oop.params, AmericanPutExercise, Discount, Regressors, τ=τ)
+

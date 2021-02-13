@@ -58,6 +58,7 @@ function run_test(x, y, layer, atol)
 
     function loss_function(θ)
         data_pred = [layer(x, θ)[1] for x in data_train_vals]
+        # data_pred = [layer2(x, θ) for x in data_train_vals]
         loss = sum((data_pred - data_train_fn) .^ 2)
         @show θ
         return loss
@@ -73,6 +74,7 @@ function run_test(x, y, layer, atol)
 
     optfunc = GalacticOptim.OptimizationFunction((x, p) -> loss_function(x), GalacticOptim.AutoZygote())
     optprob = GalacticOptim.OptimizationProblem(optfunc, layer.p)
+    optprob = GalacticOptim.OptimizationProblem(optfunc, zeros(3)) # si es layer2
     res = GalacticOptim.solve(optprob, NelderMead(), cb=cb, maxiters = 10000)
 
     # optprob = GalacticOptim.OptimizationProblem(optfunc, res.minimizer)
@@ -105,10 +107,11 @@ y = y[idxs]
 
 # podria tambien escribir una funcion f(x, p) directamente!
 layer = TensorLayer([PolynomialBasis(3)], 1)
+layer2(x, p) =  p[1] + p[2] * x + p[3] * x ^ 2
 # por otro lado, creo que tambien si tengo regresores dados por funciones por ej. un IRS value,
 # aca puedo ponerlos en el vector de la tensor layer y wow...
 
-res = run_test(x, y, layer, 1e-7)
+res = run_test(x, y, layer2, 1e-7)
 
 
 bookf(x) = -1.070 + 2.983 * x -1.813 * x^2
@@ -127,4 +130,13 @@ using LsqFit
 xdata = x
 ydata = y
 p0 = [0.1, 0.1, 0.1]
-fit = curve_fit(g, xdata, ydata, p0; autodiff=:forwarddiff)
+fit_g = curve_fit(g, xdata, ydata, p0; autodiff=:forwarddiff)
+
+# o si lo hago multiparametrico
+@. h(x, p) = p[1] + p[2] * x[:,1] + p[3] * x[:,2]
+xdata = hcat(x, x.^2)
+ydata = y
+p0 = [0.1, 0.1, 0.1]
+fit_h = curve_fit(h, xdata, ydata, p0; autodiff=:forwarddiff)
+
+fit_g.param == fit_h.param

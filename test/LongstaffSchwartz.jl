@@ -1,15 +1,6 @@
 using OrderedCollections
 using UnPack
 
-S0s = collect(36.:2.:44.)
-σs = collect(0.2:0.2:0.4)
-Ts = [1., 2.]
-
-results = [
-    4.472, 4.821, 7.091, 8.488, 3.244, 3.735, 6.139, 7.669, 2.313, 2.879,
-    5.308, 6.921, 1.617, 2.206, 4.588, 6.243, 1.118, 1.675, 3.957, 5.622
-]
-
 @testset "American Put Option" begin
 
     function f(u, p, t)
@@ -44,10 +35,19 @@ results = [
         return exp(-r * (T - t))
     end
 
-    function test(S0s, σs, Ts, results)
+    function run_test()
         r = 0.06
         K = 40.0
         Δt = 1 / 50
+
+        S0s = collect(36.:2.:44.)
+        σs = collect(0.2:0.2:0.4)
+        Ts = [1., 2.]
+
+        results = [
+            4.472, 4.821, 7.091, 8.488, 3.244, 3.735, 6.139, 7.669, 2.313, 2.879,
+            5.308, 6.921, 1.617, 2.206, 4.588, 6.243, 1.118, 1.675, 3.957, 5.622
+        ]
 
         i = 1
         for S0 in S0s, σ in σs, T in Ts
@@ -63,7 +63,7 @@ results = [
             τ = fill(Δt, Int(T/Δt))
 
             res = callable_product_valuation(
-                AmericanPutExercise, Discount, Regressors,mc, ds.params, τ=τ
+                mc, ds.params, AmericanPutExercise, Discount, Regressors, τ=τ
             )
 
             @test res.μ ≈ results[i] atol = 3*res.σ
@@ -71,5 +71,5 @@ results = [
         end
     end
 
-    test(S0s, σs, Ts, results)
+    run_test()
 end

@@ -7,8 +7,8 @@ using Reexport
 using StochasticDiffEq
 using Statistics
 using LsqFit
-# using DiffEqFlux
-# using GalacticOptim
+using DiffEqFlux
+using GalacticOptim
 
 include("securities.jl")
 export remake

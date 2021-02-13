@@ -1,7 +1,5 @@
 
-import UniversalDynamics: tenor_structure
-
-tenor_structure(::Nothing) = nothing
+using UniversalDynamics: tenor_structure
 
 struct LongstaffSchwartzEstimate{T} <: ExpectedValueEstimate
     μ::T
@@ -10,24 +8,38 @@ end
 
 const LongstaffSchwartzExpectation = LongstaffSchwartzEstimate
 
-# ExerciseValue: function ExerciseValue(u, p, Tenors, n) # Tenors, n representa t pero evitamos hacer una busqueda con ello
-# DiscountFactor: function DiscountFactor(u, p, Tenors, n), pero por ahora uso DiscountFactor(p, t, T). Luego Discount.(u, Ref(p), Ref(Tenors), n) me retorna un vector de dimension K y ese multiplico .* a Q[n+1,:]
-# Regressors: retorna un vector con los regresores para cada exercise date y trial: Regressors(u, p, Tenors, n), aunque por ahora handleamos un numero
+# ExerciseValue: function ExerciseValue(u, p, Tenors, n) # Tenors, n representa t pero
+# evitamos hacer una busqueda con ello
+
+# DiscountFactor: function DiscountFactor(u, p, Tenors, n), pero por ahora uso
+# DiscountFactor(p, t, T). Luego Discount.(u, Ref(p), Ref(Tenors), n) me retorna un vector
+# de dimension K y ese multiplico .* a Q[n+1,:]
+
+# Regressors: retorna un vector con los regresores para cada exercise date y trial:
+# Regressors(u, p, Tenors, n), aunque por ahora handleamos un numero
+
 # τ: representa los delta t comenzando en t = 0 de la Tenor Structure
 # u: monte carlo simulation from UniversalDynamics
 # p: parameters
 
+function least_squares_loss(layer, θ, xdata, ydata)
+    ypred = [layer(x, θ)[1] for x in xdata]
+    loss = sum((ypred - ydata) .^ 2)
+    return loss
+end
+
 # from Longstaff and Schwartz
 function callable_product_valuation(
-    ExerciseValue, DiscountFactor, Regressors, mc, p; τ=nothing, Tenors=tenor_structure(τ)
+    mc, p, ExerciseValue, DiscountFactor, Regressors; τ=nothing, Tenors=tenor_structure(τ)
 )
 
     if isnothing(Tenors)
         throw(ArgumentError("Provide either a `Tenors` or a `τ`s structure."))
     end
 
+    # number of exercise dates + 1 and Monte Carlo paths
     N = length(Tenors)
-    K = length(mc) # number of paths
+    K = length(mc)
     # K, N = size(mc)
 
     S = eltype(mc)
@@ -44,11 +56,13 @@ function callable_product_valuation(
 
     # explanatory variables
     ζ = Vector{S}(undef, K)
-    # ζ = Matrix{T}(undef, K, Q)
+    # ζ = Matrix{S}(undef, K, Q)
 
     # for now use this, later it is going to be a `TensorLayer` from DiffEqFlux
     @. f(x, p) = p[1] + p[2] * x + p[3] * x^2
     param = [0.1, 0.1, 0.1]
+
+    # layer = TensorLayer([PolynomialBasis(3)], 1)
 
     # loop over exercise dates
     for n in N:-1:2
@@ -62,7 +76,7 @@ function callable_product_valuation(
 
         if n == N
             for k in 1:K
-                V[k] = U[k]
+                V[k] = max(U[k], zero(S)) # in case the exercise value is coded as, e.g., a IRS
             end
         else
 
@@ -72,7 +86,7 @@ function callable_product_valuation(
             # Perform regression for each exercise date considering only in the money cases
             i = 0
             for k in 1:K
-                if U[k] > zero(T)
+                if U[k] > zero(S)
                     i += 1
                     x[i] = ζ[k] = Regressors(mc[k], p, t, Tenors, n)
                     y[i] = DiscountFactor(p, t, T, Tenors, n, n+1) * V[k]
@@ -80,11 +94,22 @@ function callable_product_valuation(
             end
             x′ = @view x[1:i]
             y′ = @view y[1:i]
+
+            # optfunc = GalacticOptim.OptimizationFunction(
+            #     (x, p) -> least_squares_loss(layer, x, x′, y′),
+            #     GalacticOptim.AutoZygote()
+            # )
+
+            # optprob = GalacticOptim.OptimizationProblem(optfunc, layer.p)
+            # HoldValue = GalacticOptim.solve(optprob, NelderMead(), maxiters=10000)
+
             HoldValue = curve_fit(f, x′, y′, param; autodiff=:forwarddiff)
 
             for k in 1:K
                 Uₖ = U[k]
-                if Uₖ > zero(T) && Uₖ > f(ζ[k], HoldValue.param)[1]
+                Hₖ = f(ζ[k], HoldValue.param)[1]
+                if Uₖ > zero(S) && Uₖ > Hₖ
+                # if Uₖ > zero(S) && Uₖ > layer(ζ[k], HoldValue.minimizer)[1]
                     V[k] = Uₖ
                 else
                     V[k] *= DiscountFactor(p, t, T, Tenors, n, n+1)
@@ -101,95 +126,84 @@ function callable_product_valuation(
     return LongstaffSchwartzEstimate{S}(μ, σ)
 end
 
-# from Andersen and Piterbarg
-function callable_libor_exotic_valuation(ExerciseValue, DiscountFactor, Regressors, τ, u, p)
+# from Andersen and Piterbarg:
 
-    T = eltype(u)
+# Entiendo que las unicas diferencias con el algoritmo de arriba son:
+# 1. La fecha N no se analiza ya que los callable libor exotics tienen ejercicio nulo en ese
+#    momento (no restan accruals).
+# 2. En N-1 comparamos el ejercicio con zero ya que en N el producto vale cero.
+# 3. No hay filtrado para hacer las regresiones.
+# Por lo tanto, un Bermudan Swaption deberia dar lo mismo tanto con este algoritmo como con
+# el anterior considerando que remuevo las filtraciones y que la funcion ExerciseValue retorne
+# zero en la fecha N.
 
-    # tenor structure
-    Tenors = UniversalDynamics.tenor_structure(τ)
+function callable_libor_exotic_valuation(
+    mc, p, ExerciseValue, DiscountFactor, Regressors; τ=nothing, Tenors=tenor_structure(τ)
+)
 
+    if isnothing(Tenors)
+        throw(ArgumentError("Provide either a `Tenors` or a `τ`s structure."))
+    end
+
+    # number of exercise dates + 1 and Monte Carlo paths
     N = length(Tenors)
-    K = length(u) # number of paths
+    K = length(mc)
 
-    # exercise dates from last to first
-    Te = @view Tenors[N-1:-1:2]
+    S = eltype(mc)
 
-    # Hold or Continuation values goes from Tenors[1] to Tenors[N-1]
-    # H[N] is never used but we keep it in order to use same indexes
-    H = Matrix{T}(undef, K, N)
+    # Exercise values
+    U = Vector{S}(undef, K)
 
-    # Exercise values goes from Tenors[2] to Tenors[N]
-    # U[1] is never used but we keep it in order to use same indexes
-    U = Matrix{T}(undef, K, N)
-
-    # Handler for max(H, U)
-    Q = Matrix{T}(undef, K, N)
+    # Payoff values
+    V = Vector{S}(undef, K)
 
     # for regressions
-    y = Vector{T}(undef, K)
-
-    # assuming that the exercise value has a closed form solution for its expectation
-    for k in 1:K
-        uₖ = u[k]
-        for n in 2:N-1
-            U[k,n] = ExerciseValue(uₖ, p, Tenors, n)
-        end
-        # the exercise value is zero at Tenors[N]
-        U[k,N] = zero(T)
-    end
-
-    # explanatory variables
-    # en el caso general, `ζ` apunta a un vector y esa dimension q la calculo antes
-    ζ = Matrix{T}(undef, K, N)
-    for k in 1:K
-        uₖ = u[k]
-        for n in 2:N-1
-            # en el caso general, el usuario entrega una funcion que retorna un vector de
-            # dimension `q` con las variables explanatorias dadas las simulaciones del trial
-            # k. Ahora igual estoy considerando una unica explanatory variable
-            ζ[k,n] = Regressors(uₖ, p, Tenors, n)
-        end
-    end
+    y = Vector{S}(undef, K)
 
     # for now use this, later it is going to be a `TensorLayer` from DiffEqFlux
     @. f(x, p) = p[1] + p[2] * x + p[3] * x^2
     param = [0.1, 0.1, 0.1]
 
     # loop over exercise dates
-    for (e, n) in enumerate(N-1:-1:2)
+    for n in N-1:-1:2
 
-        # T = Tenors[n]
-        # Te = T[e]
+        # exercise date
+        t = Tenors[n]
 
-        if isone(e) # n == N-1
+        for k in 1:K
+            U[k] = ExerciseValue(mc[k], p, t, Tenors, n)
+        end
 
-            # the hold value is zero at Tenors[N-1]
-            H[:,n] .= zero(T)
-            Q[:,n] .= max.(@view(U[:,n]), @view(H[:,n]))
-            # @views Q[:,n] .= max.(U[:,n], H[:,n])
-
+        if n == N-1
+            for k in 1:K
+                V[k] = max(U[k], zero(S))
+            end
         else
 
+            # previous exercise date inspected
+            T = Tenors[n+1]
+
             # Perform a regression for each exercise date.
-            # Note that Andersen do not apply any kind of filtering.
-            x  = @view ζ[:,n]
-            y .= DiscountFactor(p, Tenors[n], Tenors[n+1]) .* @view(Q[:,n+1]) #! in the general case, the discount is a vector
-            HoldValue = curve_fit(f, x, y, param; autodiff=:forwarddiff)
+            # Note that Andersen doesn't apply any kind of filtering.
+            for k in 1:K
+                ζ[k] = Regressors(mc[k], p, t, Tenors, n)
+                y[k] = DiscountFactor(p, t, T, Tenors, n, n+1) * V[k]
+            end
+
+            HoldValue = curve_fit(f, ζ, y, param; autodiff=:forwarddiff)
 
             for k in 1:K
-                H[k,n] = f(ζ[k,n], HoldValue.param)[1]
-                Q[k,n] = max(U[k,n], H[k,n])
+                Uₖ = U[k]
+                Hₖ = f(ζ[k], HoldValue.param)[1]
+                V[k] = max(Uₖ, Hₖ)
             end
         end
     end
 
-    # Q(0)
-    Q[:,1] .= DiscountFactor(p, Tenors[1], Tenors[2]) .* @view(Q[:,2])
-    Q0 = @view Q[:,1]
+    V .*= DiscountFactor(p, Tenors[1], Tenors[2], Tenors, 1, 2)
 
-    μ = mean(Q0)
-    σ = stdm(Q0, μ; corrected=true) / sqrt(K)
+    μ = mean(V)
+    σ = stdm(V, μ; corrected=true) / sqrt(K)
 
-    return LongstaffSchwartzEstimate{T}(μ, σ, ζ, U, H, Q)
+    return LongstaffSchwartzEstimate{S}(μ, σ)
 end
