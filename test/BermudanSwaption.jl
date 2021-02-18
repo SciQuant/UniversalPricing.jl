@@ -4,94 +4,128 @@ using OrderedCollections
 using UnPack
 using Test
 
+# from CONTROL VARIATES FOR CALLABLE LIBOR EXOTICS A PRELIMINARY STUDY, Jacob Buitelaar and
+# Roger Lord
 
-Δ = 0.25
-τ = [Δ for i in 1:4]
-Tenors = vcat(zero(eltype(τ)), cumsum(τ))
+function test_bermudan_swaption()
+    Δ = 1 / 2
+    τ = @SVector [Δ for i in 1:12]
+    Tenors = UniversalDynamics.tenor_structure(τ)
 
-# esto es de prueba viendo ej. pg 32 paper copado, aunque ahi es non-diagonal noise
-function σt(i, t)
-    return 0.6 * exp(-0.1 * (Tenors[i] - t))
-end
+    Φ = @SVector [NaN, 0.153, 0.143, 0.140, 0.140, 0.139, 0.138, 0.137, 0.136, 0.135, 0.134, 0.132]
+    a = 0.976
+    b = 2.0
+    c = 1.5
+    d = 0.5
+    ρ∞ = 0.663
 
-function σ!(u, t)
+    C = 2.22 / 100
 
-    # podria loopear solo en los indices 2:4-1 en Terminal measure
-    for i in 1:4
-        u[i] = zero(eltype(u))
-        if t ≤ Tenors[i]
-            u[i] = σt(i, t)
+    ρ = @SMatrix [exp(abs(i - j) / 9 * log(ρ∞)) for i in 1:12, j in 1:12]
+    L0 = @SVector [0.023, 0.025, 0.027, 0.027, 0.031, 0.031, 0.033, 0.034, 0.036, 0.036, 0.036, 0.038]
+
+    # "abcd" time dependent volatility structure:
+    function σt(i, t)
+        Δt = Tenors[i] - t
+        return Φ[i] * ((a * Δt + d) * exp(-b * Δt) + c)
+    end
+
+    function σ(t)
+
+        # this one computes unnecesary values
+        # return @SVector [σt(i, t) for i in 1:4]
+
+        # we could use an MVector, modify and convert to SVector
+
+        # or this method:
+        # notar que podria loopear solo en los indices 2:12-1 en Terminal measure
+        return SVector(ntuple(Val{12}()) do i
+            if t ≤ Tenors[i]
+                return σt(i, t)
+            else
+                return zero(promote_type(1/t))
+            end
+        end)
+    end
+
+    function f(u, p, t)
+        @unpack L_dynamics, L_security = p
+
+        L = remake(L_security, u)
+
+        IR = FixedIncomeSecurities(L_dynamics, L)
+
+        dL = UniversalDynamics.drift(L(t), UniversalDynamics.parameters(L_dynamics), t)
+
+        return dL
+    end
+
+    function g(u, p, t)
+        @unpack L_dynamics, L_security = p
+
+        L = remake(L_security, u)
+
+        IR = FixedIncomeSecurities(L_dynamics, L)
+
+        dL = UniversalDynamics.diffusion(L(t), UniversalDynamics.parameters(L_dynamics), t)
+
+        return dL
+    end
+
+    # exercise value at time t = Tenors[n] as a solved expectation
+    function BermudanSwaptionExercise(u, p, t, Tenors=nothing, n=nothing)
+        @unpack L_dynamics, L_security = p
+
+        L = remake(L_security, u)
+        IR = FixedIncomeSecurities(L_dynamics, L)
+
+        # eventualmente solo vamos a llamar aca a FixedIncomeInstruments y tener un swap y
+        # evaluar su present value. Es decir, definiremos un swap con una estructura de tenors
+        # cada vez mas corta y evaluaremos su present value.
+
+        # this is one way
+        # sum(IR.P(t, Tenors[i+1]) * τ[i] * (C[i] - IR.L(i, t)) for i in n:length(Tenors)-1)
+
+        if n == 12
+            return 0.
         end
+
+        # this is another
+        res = zero(eltype(Tenors))
+        for i in n:length(Tenors)-1
+            res += IR.P(t, Tenors[i+1]) * τ[i] * (C - IR.L(i, t))
+        end
+        return res
     end
 
-    return nothing
-end
+    Regressors = BermudanSwaptionExercise
 
-ρ = [1.0 0.2 0.2 0.2
-    0.2 1.0 0.2 0.2
-    0.2 0.2 1.0 0.2
-    0.2 0.2 0.2 1.0]
-L0 = [0.0112, 0.0118, 0.0123, 0.0127]
-L = LiborMarketModelDynamics(L0, τ, σ!, ρ, measure=Terminal(), imethod=Schlogl(true))
+    function Discount(p, t, T, Tenors=nothing, n=nothing, n′=nothing)
+        @unpack L_dynamics, L_security = p
 
-function f!(du, u, p, t)
-    @unpack L_dynamics, L_security = p
+        L = remake(L_security, u)
+        IR = FixedIncomeSecurities(L_dynamics, L)
 
-    L = UniversalDynamics.remake(L_security, u, du)
-
-    IR = FixedIncomeSecurities(L_dynamics, L)
-
-    UniversalDynamics.drift!(L.dx, L(t), UniversalDynamics.parameters(L_dynamics), t)
-
-    return nothing
-end
-
-function g!(du, u, p, t)
-    @unpack L_dynamics, L_security = p
-
-    L = UniversalDynamics.remake(L_security, u, du)
-
-    IR = FixedIncomeSecurities(L_dynamics, L)
-
-    UniversalDynamics.diffusion!(L.dx, L(t), UniversalDynamics.parameters(L_dynamics), t)
-
-    return nothing
-end
-
-dynamics = OrderedDict(:L => L)
-ds_iip = DynamicalSystem(f!, g!, dynamics, nothing)
-sol_iip = solve(ds_iip, 1., seed=1)
-
-
-
-
-
-
-# exercise value at time Tn = Tenors[n] as a solved expectation
-function BermudanSwaptionExercise(u, p, t, Tenors=nothing, n=nothing)
-    @unpack L_dynamics, L_security = p
-    @unpack τ, C = p
-
-    L = UniversalDynamics.remake(L_security, u)
-    IR = FixedIncomeSecurities(L_dynamics, L)
-
-    # eventualmente solo vamos a llamar aca a FixedIncomeInstruments y tener un swap y
-    # evaluar su present value. Es decir, definiremos un swap con una estructura de tenors
-    # cada vez mas corta y evaluaremos su present value.
-
-    Tn = Tenors[n] #! reemplazar por t
-    # this is one way
-    # sum(IR.P(Tn, Tenors[i+1]) * τ[i] * (C[i] - IR.L(i, Tn)) for i in n:length(Tenors)-1)
-
-    # this is another
-    res = zero(eltype(Tenors))
-    for i in n:length(Tenors)-1
-        res += IR.P(Tn, Tenors[i+1]) * τ[i] * (C[i] - IR.L(i, Tn))
+        return IR.D(t, T)
     end
-    return res
+
+    L = LiborMarketModelDynamics(L0, τ, σ, ρ, measure=Spot(), imethod=Schlogl(true))
+    dynamics = OrderedDict(:L => L)
+    ds = DynamicalSystem(f, g, dynamics, nothing)
+
+    # tengo un problema si meto varios trials y uso SRI1W()
+    mc = montecarlo(ds, 6., 10000; alg=UniversalDynamics.EM(), seed=1, dt=0.01)
+
+    # los siguientes dos algoritmos no me estan dando lo mismo y ninguno da como en la ref.
+    res = callable_libor_exotic_valuation(
+        mc, ds.params, BermudanSwaptionExercise, Discount, Regressors, τ=τ
+    )
+
+    res = callable_product_valuation(
+        mc, ds.params, BermudanSwaptionExercise, Discount, Regressors, τ=τ
+    )
+
 end
-
-
 
 
 using StaticArrays

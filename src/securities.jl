@@ -7,3 +7,5 @@ end
 
 (s::Security{D,D,M,M,U})(t::Real) where {D,M,U<:RODESolution} = s.u(t; idxs=D)[]
 (s::Security{Di,Df,Mi,Mf,U})(t::Real) where {Di,Df,Mi,Mf,U<:RODESolution} = s.u(t; idxs=Di:Df)
+
+(s::Security{Di,Df,Mi,Mf,U})(i::Integer, t::Real) where {Di,Df,Mi,Mf,U<:RODESolution} = s.u(t; idxs=i)

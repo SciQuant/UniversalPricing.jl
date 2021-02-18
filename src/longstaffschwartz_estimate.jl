@@ -160,6 +160,10 @@ function callable_libor_exotic_valuation(
     # for regressions
     y = Vector{S}(undef, K)
 
+    # explanatory variables
+    ζ = Vector{S}(undef, K)
+    # ζ = Matrix{S}(undef, K, Q)
+
     # for now use this, later it is going to be a `TensorLayer` from DiffEqFlux
     @. f(x, p) = p[1] + p[2] * x + p[3] * x^2
     param = [0.1, 0.1, 0.1]

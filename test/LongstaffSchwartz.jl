@@ -82,13 +82,14 @@ end
         I0 = SVector(1.)
         I = SystemDynamics(I0)
 
-        xdata = [0.04, 0.05, 0.06, 0.07]
-        ydata = [4.00, 0.50, 0.10, 0.00]
+        xdata = @SVector [0.04, 0.05, 0.06, 0.07]
+        ydata = @SVector [4.00, 0.50, 0.10, 0.00]
         f = LinearInterpolation((xdata,), ydata, extrapolation_bc=Interpolations.Flat())
 
         x0 = SVector(0.002, 0.050)
 
-        ξ₀(t) = zero(t) # ξ₀ = zero
+        # r(t) = x(t) + y(t)
+        ξ₀(t) = zero(t)
         ξ₁(t) = @SVector ones(2)
 
         β′ = 0.1
@@ -114,7 +115,8 @@ end
 
         #! no estoy seguro del searchsortedfirst, pero de otra forma, si arranco en 1 siempre,
         #! voy a tener casos como P(t, 0.5) con t > 0.5! Por se motivo estoy haciendo esto.
-        #! Hay que charlarlo!
+        #! Hay que charlarlo! Sospecho que el numerador tambien deberia tener en cuenta algo
+        #! acerca de que el swap se va acortando. Aunque creo que esta bien.
         function CMS(P, t, T)
             return 2 * (1 - P(t, 10.)) / sum(P(t, i/2) for i in searchsortedfirst(T, t):20)
         end
