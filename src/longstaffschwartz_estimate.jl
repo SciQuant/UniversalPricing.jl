@@ -11,9 +11,7 @@ const LongstaffSchwartzExpectation = LongstaffSchwartzEstimate
 # ExerciseValue: function ExerciseValue(u, p, Tenors, n) # Tenors, n representa t pero
 # evitamos hacer una busqueda con ello
 
-# DiscountFactor: function DiscountFactor(u, p, Tenors, n), pero por ahora uso
-# DiscountFactor(p, t, T). Luego Discount.(u, Ref(p), Ref(Tenors), n) me retorna un vector
-# de dimension K y ese multiplico .* a Q[n+1,:]
+# DiscountFactor: function DiscountFactor(u, p, Tenors, n)
 
 # Regressors: retorna un vector con los regresores para cada exercise date y trial:
 # Regressors(u, p, Tenors, n), aunque por ahora handleamos un numero
@@ -88,8 +86,9 @@ function callable_product_valuation(
             for k in 1:K
                 if U[k] > zero(S)
                     i += 1
-                    x[i] = ζ[k] = Regressors(mc[k], p, t, Tenors, n)
-                    y[i] = DiscountFactor(p, t, T, Tenors, n, n+1) * V[k]
+                    uₖ = mc[k]
+                    x[i] = ζ[k] = Regressors(uₖ, p, t, Tenors, n)
+                    y[i] = DiscountFactor(uₖ, p, t, T, Tenors, n, n+1) * V[k]
                 end
             end
             x′ = @view x[1:i]
@@ -112,13 +111,15 @@ function callable_product_valuation(
                 # if Uₖ > zero(S) && Uₖ > layer(ζ[k], HoldValue.minimizer)[1]
                     V[k] = Uₖ
                 else
-                    V[k] *= DiscountFactor(p, t, T, Tenors, n, n+1)
+                    V[k] *= DiscountFactor(mc[k], p, t, T, Tenors, n, n+1)
                 end
             end
         end
     end
 
-    V .*= DiscountFactor(p, Tenors[1], Tenors[2], Tenors, 1, 2)
+    for k in 1:K
+        V[k] *= DiscountFactor(mc[k], p, Tenors[1], Tenors[2], Tenors, 1, 2)
+    end
 
     μ = mean(V)
     σ = stdm(V, μ; corrected=true) / sqrt(K)
@@ -190,8 +191,9 @@ function callable_libor_exotic_valuation(
             # Perform a regression for each exercise date.
             # Note that Andersen doesn't apply any kind of filtering.
             for k in 1:K
-                ζ[k] = Regressors(mc[k], p, t, Tenors, n)
-                y[k] = DiscountFactor(p, t, T, Tenors, n, n+1) * V[k]
+                uₖ = mc[k]
+                ζ[k] = Regressors(uₖ, p, t, Tenors, n)
+                y[k] = DiscountFactor(uₖ, p, t, T, Tenors, n, n+1) * V[k]
             end
 
             HoldValue = curve_fit(f, ζ, y, param; autodiff=:forwarddiff)
@@ -204,7 +206,9 @@ function callable_libor_exotic_valuation(
         end
     end
 
-    V .*= DiscountFactor(p, Tenors[1], Tenors[2], Tenors, 1, 2)
+    for k in 1:K
+        V[k] *= DiscountFactor(mc[k], p, Tenors[1], Tenors[2], Tenors, 1, 2)
+    end
 
     μ = mean(V)
     σ = stdm(V, μ; corrected=true) / sqrt(K)

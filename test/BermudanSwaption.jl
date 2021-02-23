@@ -7,8 +7,8 @@ using Test
 # from CONTROL VARIATES FOR CALLABLE LIBOR EXOTICS A PRELIMINARY STUDY, Jacob Buitelaar and
 # Roger Lord
 
-function test_bermudan_swaption()
-    Δ = 1 / 2
+# function test_bermudan_swaption()
+    Δ = 1/2
     τ = @SVector [Δ for i in 1:12]
     Tenors = UniversalDynamics.tenor_structure(τ)
 
@@ -43,7 +43,7 @@ function test_bermudan_swaption()
             if t ≤ Tenors[i]
                 return σt(i, t)
             else
-                return zero(promote_type(1/t))
+                return zero(eltype(L0))
             end
         end)
     end
@@ -91,7 +91,7 @@ function test_bermudan_swaption()
         end
 
         # this is another
-        res = zero(eltype(Tenors))
+        res = zero(eltype(L_dynamics))
         for i in n:length(Tenors)-1
             res += IR.P(t, Tenors[i+1]) * τ[i] * (C - IR.L(i, t))
         end
@@ -100,7 +100,7 @@ function test_bermudan_swaption()
 
     Regressors = BermudanSwaptionExercise
 
-    function Discount(p, t, T, Tenors=nothing, n=nothing, n′=nothing)
+    function Discount(u, p, t, T, Tenors=nothing, n=nothing, n′=nothing)
         @unpack L_dynamics, L_security = p
 
         L = remake(L_security, u)
@@ -109,12 +109,13 @@ function test_bermudan_swaption()
         return IR.D(t, T)
     end
 
-    L = LiborMarketModelDynamics(L0, τ, σ, ρ, measure=Spot(), imethod=Schlogl(true))
+    τ = @SVector [Δ for i in 1:12]
+    L = LiborMarketModelDynamics(L0, τ, σ, ρ, measure=Spot()) # imethod=Schlogl(true)
     dynamics = OrderedDict(:L => L)
     ds = DynamicalSystem(f, g, dynamics, nothing)
 
     # tengo un problema si meto varios trials y uso SRI1W()
-    mc = montecarlo(ds, 6., 10000; alg=UniversalDynamics.EM(), seed=1, dt=0.01)
+    mc = montecarlo(ds, 6., 5_000; alg=UniversalDynamics.EM(), seed=1, dt=0.01)
 
     # los siguientes dos algoritmos no me estan dando lo mismo y ninguno da como en la ref.
     res = callable_libor_exotic_valuation(
@@ -125,7 +126,148 @@ function test_bermudan_swaption()
         mc, ds.params, BermudanSwaptionExercise, Discount, Regressors, τ=τ
     )
 
-end
+
+    #! tengo que simular en Spot para esta, aunque estoy medio confundido porque la realidad
+    #! es que hay una expectation interna que ha sido resuelta en la Tn+1...
+    function Swap(u, p)
+        @unpack L_dynamics, L_security = p
+
+        L = remake(L_security, u)
+        IR = FixedIncomeSecurities(L_dynamics, L)
+
+        res = zero(eltype(L_dynamics))
+        for i in 1:length(Tenors)-1
+
+            # fixing and payment
+            Tx = Tenors[i]
+            Tp = Tenors[i+1]
+
+            res += IR.D(0, Tp) * τ[i] * (IR.L(i, Tx) - C) # IR.L(Tx, Tx, Tp) is the same
+        end
+        return res
+
+        # return sum(
+        #     IR.D(0, Tenors[i+1]) * τ[i] * (IR.L(i, Tenors[i]) - C) for i in 1:length(Tenors)-1
+        # )
+
+    end
+
+    v1 = 𝔼(Swap, mc, ds.params)
+
+    #! esta solo necesita un trial ya que en realidad la expectation esta resuelta.
+    function Swap2(u, p)
+        @unpack L_dynamics, L_security = p
+
+        L = remake(L_security, u)
+        IR = FixedIncomeSecurities(L_dynamics, L)
+
+        res = zero(eltype(L_dynamics))
+        for i in 1:length(Tenors)-1
+
+            # fixing and payment
+            Tx = Tenors[i]
+            Tp = Tenors[i+1]
+
+            res += IR.P(0, Tp) * τ[i] * (IR.L(i, 0) - C) # IR.L(0, Tx, Tp) is the same
+        end
+        return res
+    end
+
+    v2 = 𝔼(Swap2, mc, ds.params)
+
+    # v1 y v2 deben dar lo mismo, ya lo dan!
+
+    # esta simulamos en Spot()
+    function Swaption(u, p)
+        @unpack L_dynamics, L_security = p
+
+        L = remake(L_security, u)
+        IR = FixedIncomeSecurities(L_dynamics, L)
+
+        #! tengo que escribir esto pensando que en el swaption la unica fecha de
+        #! opcionalidad es solo la primera de ejercicio de un Bermudan
+        T₀ = Tenors[2]
+
+        # fixing and payment dates of the underlying IRS
+        Tx = @view Tenors[2:end-1]
+        Tp = @view Tenors[3:end]
+
+        return IR.D(0, T₀) * max(
+            sum(IR.P(T₀, Tp[i]) * 0.5 * (IR.L(i+1, T₀) - C) for i in 1:length(Tx)),
+            zero(eltype(L_dynamics))
+        )
+    end
+
+    v3 = 𝔼(Swaption, mc, ds.params)
+
+    # en esta funcion se ve claramente que Tenors indica en realidad las fechas de opcionalidad
+    # pero aca necesitamos las fechas de un underlying swap al que entramos.
+    TenorStructure = collect(0.5:0.5:6.)
+    function SwaptionExercise(u, p, t, Tenors=nothing, n=nothing)
+        @unpack L_dynamics, L_security = p
+
+        L = remake(L_security, u)
+        IR = FixedIncomeSecurities(L_dynamics, L)
+
+        Tx = TenorStructure[1:end-1]
+        Tp = TenorStructure[2:end]
+
+        res = zero(eltype(L_dynamics))
+        for i in 1:length(Tp)
+            res += IR.P(t, Tp[i]) * 0.5 * (IR.L(i+1, t) - C)
+        end
+        return res
+    end
+
+    # como hay solo una fecha de optionality, no necesitamos regressors
+    τ = [0.5, 5.5]
+    res = callable_libor_exotic_valuation(
+        mc, ds.params, SwaptionExercise, Discount, nothing, τ=τ
+    )
+
+    τ = [0.5]
+    res = callable_product_valuation(
+        mc, ds.params, SwaptionExercise, Discount, nothing, τ=τ
+    )
+
+    #! hasta aca todos los Swaption dieron iguales
+
+    # esta simulamos en Terminal().... mmmm no! no se puede claramente
+    function Swaption2()
+        @unpack L_dynamics, L_security = p
+
+        L = remake(L_security, u)
+        IR = FixedIncomeSecurities(L_dynamics, L)
+
+        # TODO: EN ESTA ME SUENA A QUE HAY UN ERROR... COMO PUEDE SER IGUAL A LA ANTERIOR EN SPOT()?
+        #! tengo que escribir esto pensando que en el swaption la unica fecha de
+        #! opcionalidad es solo la primera de ejercicio de un Bermudan
+        IR.D(0, T₀) * max(sum(IR.P(T₀, T[i+1]) * τ[i] * (IR.L(i+1, T₀) - c) for i in 1:N), 0.0)
+    end
+
+# end
+
+
+
+
+
+δ = 1/4
+N = 20
+τ = @SVector [δ for i in 1:N]
+Tenors = UniversalDynamics.tenor_structure(τ)
+
+
+P₀(n) = exp(-0.05 * Tenors[n])
+L₀(n) = 1/δ * (P₀(n) / P₀(n+1) - 1)
+
+L0 = @SVector [L₀(n) for n in 1:20]
+
+L = LiborMarketModelDynamics(L0, τ, σ, ρ, measure=Terminal())
+dynamics = OrderedDict(:L => L)
+
+
+
+
 
 
 using StaticArrays

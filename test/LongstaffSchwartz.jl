@@ -33,7 +33,7 @@ using UnPack
             return X(t)
         end
 
-        function Discount(p, t, T, Tenors=nothing, n=nothing, n′=nothing)
+        function Discount(u, p, t, T, Tenors=nothing, n=nothing, n′=nothing)
             @unpack r = p
             return exp(-r * (T - t))
         end
