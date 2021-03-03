@@ -1,7 +1,7 @@
 
 using UniversalDynamics: tenor_structure
 
-struct LongstaffSchwartzEstimate{T} <: ExpectedValueEstimate
+struct LongstaffSchwartzEstimate{T} <: MonteCarloExpectedValueEstimate
     μ::T
     σ::T
 end

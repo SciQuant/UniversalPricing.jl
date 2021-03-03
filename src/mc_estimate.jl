@@ -1,32 +1,29 @@
 import Base: (==), (+), (-), (*), (/)
 
-struct MonteCarloExpectedValueEstimate{T<:Real} <: ExpectedValueEstimate
+struct MCExpectation{T<:Real} <: MonteCarloExpectedValueEstimate
     μ::T
     σ::T
 end
 
-# aliases
-const MCExpectation = MonteCarloExpectedValueEstimate
-const 𝔼 = MonteCarloExpectedValueEstimate
+# alias
+const 𝔼 = MCExpectation
 
 MCExpectation(x::Real, y::Real) = MCExpectation(promote(x, y)...)
 MCExpectation(x::Real) = MCExpectation(x, zero(x))
 
 """
-    MCExpectation(f, u, p) -> MCExpectation
+    MCExpectation(f, sol, p) -> MCExpectation
 
 Computes a Monte Carlo estimation for the expectation of the random variable `f(u, p)` using
 realizations `u` and parameters `p`.
 """
-function MCExpectation(f, u::EnsembleSolution, p)
-    trajectories = length(u)
+function MCExpectation(f, sol::EnsembleSolution, p)
+    trajectories = length(sol)
     evs = zeros(trajectories)
 
     for n in 1:trajectories
-        evs[n] = f(u[n], p)
+        evs[n] = f(sol[n], p)
     end
-
-    # evs = f.(u, Ref(p))
 
     # fair value and standard deviation
     μ = mean(evs)

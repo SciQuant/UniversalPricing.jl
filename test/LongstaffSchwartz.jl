@@ -1,4 +1,3 @@
-using OrderedCollections
 using Interpolations
 using UnPack
 
@@ -7,30 +6,34 @@ using UnPack
     function american_put_test()
 
         function f(u, p, t)
-            @unpack x_security = p
+            @unpack _securities_ = p
+            @unpack _x_ = _securities_
             @unpack r = p
-            x = remake(x_security, u)
+            x = remake(_x_, u)
             return SVector(r * x(t))
         end
 
         function g(u, p, t)
-            @unpack x_security = p
+            @unpack _securities_ = p
+            @unpack _x_ = _securities_
             @unpack σ = p
-            x = remake(x_security, u)
+            x = remake(_x_, u)
             return SVector(σ * x(t))
         end
 
         function AmericanPutExercise(u, p, t, Tenors=nothing, n=nothing)
-            @unpack x_security = p
+            @unpack _securities_ = p
+            @unpack _x_ = _securities_
             @unpack K = p
-            X = remake(x_security, u)
-            return max(K - X(t), zero(K))
+            x = remake(_x_, u)
+            return max(K - x(t), zero(K))
         end
 
         function Regressors(u, p, t, Tenors=nothing, n=nothing)
-            @unpack x_security = p
-            X = remake(x_security, u)
-            return X(t)
+            @unpack _securities_ = p
+            @unpack _x_ = _securities_
+            x = remake(_x_, u)
+            return x(t)
         end
 
         function Discount(u, p, t, T, Tenors=nothing, n=nothing, n′=nothing)
@@ -58,7 +61,7 @@ using UnPack
 
             # en LongstaffSchwartz usaron 100_000 paths, pero creo que yo tengo
             # inestabilidades al testear asi...
-            dynamics = OrderedDict(:x => x)
+            dynamics = [:x => x]
             ds = DynamicalSystem(f, g, dynamics, (σ=σ, r=r, K=K))
             mc = montecarlo(ds, T, 10_000; alg=UniversalDynamics.EM(), seed=1, dt=Δt)
 
@@ -121,37 +124,41 @@ end
             return 2 * (1 - P(t, 10.)) / sum(P(t, i/2) for i in searchsortedfirst(T, t):20)
         end
 
-        function drift(u, p, t)
-            @unpack x_dynamics, I_security, x_security, B_security = p
+        function ff(u, p, t)
+            @unpack _dynamics, _securities_ = p
+            @unpack _x = _dynamics
+            @unpack _x_, _I_, _B_ = _securities_
             @unpack f, T = p
 
-            I = remake(I_security, u)
-            x = remake(x_security, u)
-            B = remake(B_security, u)
+            I = remake(_I_, u)
+            x = remake(_x_, u)
+            B = remake(_B_, u)
 
-            IR = FixedIncomeSecurities(x_dynamics, x, B)
+            IR = FixedIncomeSecurities(_x, x, B)
 
             dI = -f(CMS(IR.P, t, T))
-            dx = UniversalDynamics.drift(x(t), UniversalDynamics.parameters(x_dynamics), t)
+            dx = drift(x(t), get_parameters(_x), t)
             dB = IR.r(t) * B(t)
 
             return vcat(dI, dx, dB)
         end
 
-        function diffusion(u, p, t)
-            @unpack x_dynamics, x_security = p
+        function gg(u, p, t)
+            @unpack _dynamics, _securities_ = p
+            @unpack _x = _dynamics
+            @unpack _x_ = _securities_
 
-            x = remake(x_security, u)
+            x = remake(_x_, u)
 
             dI = zero(eltype(u))
-            dx = UniversalDynamics.diffusion(x(t), UniversalDynamics.parameters(x_dynamics), t)
+            dx = diffusion(x(t), get_parameters(_x), t)
             dB = zero(eltype(u))
 
             return vcat(dI, dx, dB)
         end
 
-        dynamics = OrderedDict(:I => I, :x => x, :B => B)
-        ds = DynamicalSystem(drift, diffusion, dynamics, (f=f, T=[i/2 for i in 1:20]))
+        dynamics = [:I => I, :x => x, :B => B]
+        ds = DynamicalSystem(ff, gg, dynamics, (f=f, T=[i/2 for i in 1:20]))
         sol = solve(ds, 5., alg=UniversalDynamics.EM(), dt=0.01, seed=1)
         sol = solve(ds, 5., alg=UniversalDynamics.SRIW1(), seed=1)
         mc = montecarlo(ds, 5., 2; alg=UniversalDynamics.SRIW1(), seed=1)
